@@ -1,24 +1,43 @@
 /**
  * API service for HTTP requests
- * Handles authentication, error handling, and token refresh
+ * Handles authentication, CSRF tokens, error handling, and token refresh
  *
  * Security: Uses withCredentials for HttpOnly cookie support
  */
 
 import { useAuthStore } from '../store/authStore';
 
-const BASE_URL = '';
+const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 interface ApiError extends Error {
   code?: string;
   status?: number;
 }
 
-interface RequestOptions {
-  withCredentials?: boolean;
+export interface ApiResponse<T> {
+  data: T;
 }
 
-class ApiService {
+export interface RequestOptions {
+  withCredentials?: boolean;
+  disableRetry?: boolean;
+}
+
+export class ApiService {
+  private csrfToken: string | null = null;
+
+  async fetchCsrfToken(): Promise<void> {
+    try {
+      const response = await fetch(`${BASE_URL}/api/auth/csrf-token`, {
+        credentials: 'include'
+      });
+      const data = await response.json();
+      this.csrfToken = data.csrfToken;
+    } catch (error) {
+      console.error('[API] Failed to fetch CSRF token:', error);
+    }
+  }
+
   private getHeaders(): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json'
@@ -29,28 +48,19 @@ class ApiService {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
 
+    if (this.csrfToken) {
+      headers['X-CSRF-Token'] = this.csrfToken;
+    }
+
     return headers;
   }
 
   private async handleResponse<T>(response: Response): Promise<T> {
     if (response.ok) {
-      return response.json();
-    }
-
-    // Handle specific error codes
-    if (response.status === 401) {
-      const { refreshTokens, logout } = useAuthStore.getState();
-
-      // Try to refresh token
-      const refreshed = await refreshTokens();
-
-      if (!refreshed) {
-        logout();
-        throw this.createError('Session expired. Please login again.', 'SESSION_EXPIRED', 401);
+      if (response.status === 204) {
+        return undefined as T;
       }
-
-      // Retry would need to be handled by the caller
-      throw this.createError('Token refreshed, please retry', 'TOKEN_REFRESHED', 401);
+      return response.json();
     }
 
     const errorData = await response.json().catch(() => ({}));
@@ -68,50 +78,70 @@ class ApiService {
     return error;
   }
 
-  async get<T = unknown>(url: string, options: RequestOptions = {}): Promise<{ data: T }> {
+  private async fetchWithRetry<T>(
+    url: string,
+    options: RequestInit & { disableRetry?: boolean },
+    retryCount = 0
+  ): Promise<ApiResponse<T>> {
+    const { disableRetry, ...fetchOptions } = options;
+
     const response = await fetch(`${BASE_URL}${url}`, {
+      ...fetchOptions,
+      headers: {
+        ...this.getHeaders(),
+        ...(fetchOptions.headers || {})
+      },
+      credentials: fetchOptions.credentials ?? 'include'
+    });
+
+    if (!disableRetry && response.status === 401 && retryCount === 0) {
+      const { refreshTokens, logout } = useAuthStore.getState();
+      const refreshed = await refreshTokens();
+
+      if (refreshed) {
+        return this.fetchWithRetry<T>(url, options, retryCount + 1);
+      }
+
+      logout();
+      throw this.createError('Session expired. Please login again.', 'SESSION_EXPIRED', 401);
+    }
+
+    const data = await this.handleResponse<T>(response);
+    return { data };
+  }
+
+  async get<T = unknown>(url: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+    return this.fetchWithRetry<T>(url, {
       method: 'GET',
-      headers: this.getHeaders(),
-      credentials: options.withCredentials ? 'include' : 'same-origin'
+      credentials: options.withCredentials ? 'include' : 'same-origin',
+      disableRetry: options.disableRetry
     });
-
-    const data = await this.handleResponse<T>(response);
-    return { data };
   }
 
-  async post<T = unknown>(url: string, body?: unknown, options: RequestOptions = {}): Promise<{ data: T }> {
-    const response = await fetch(`${BASE_URL}${url}`, {
+  async post<T = unknown>(url: string, body?: unknown, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+    return this.fetchWithRetry<T>(url, {
       method: 'POST',
-      headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
-      credentials: options.withCredentials ? 'include' : 'same-origin'
+      credentials: options.withCredentials ? 'include' : 'same-origin',
+      disableRetry: options.disableRetry
     });
-
-    const data = await this.handleResponse<T>(response);
-    return { data };
   }
 
-  async put<T = unknown>(url: string, body?: unknown, options: RequestOptions = {}): Promise<{ data: T }> {
-    const response = await fetch(`${BASE_URL}${url}`, {
+  async put<T = unknown>(url: string, body?: unknown, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+    return this.fetchWithRetry<T>(url, {
       method: 'PUT',
-      headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
-      credentials: options.withCredentials ? 'include' : 'same-origin'
+      credentials: options.withCredentials ? 'include' : 'same-origin',
+      disableRetry: options.disableRetry
     });
-
-    const data = await this.handleResponse<T>(response);
-    return { data };
   }
 
-  async delete<T = unknown>(url: string, options: RequestOptions = {}): Promise<{ data: T }> {
-    const response = await fetch(`${BASE_URL}${url}`, {
+  async delete<T = unknown>(url: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+    return this.fetchWithRetry<T>(url, {
       method: 'DELETE',
-      headers: this.getHeaders(),
-      credentials: options.withCredentials ? 'include' : 'same-origin'
+      credentials: options.withCredentials ? 'include' : 'same-origin',
+      disableRetry: options.disableRetry
     });
-
-    const data = await this.handleResponse<T>(response);
-    return { data };
   }
 }
 

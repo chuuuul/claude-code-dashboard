@@ -50,11 +50,13 @@ export const useAuthStore = create<AuthState>()(
             username,
             password
           }, {
-            withCredentials: true // Required for HttpOnly cookies
+            withCredentials: true, // Required for HttpOnly cookies
+            disableRetry: true
           });
 
           // Server now only returns accessToken and user (refreshToken is in HttpOnly cookie)
           const { accessToken, user } = response.data as LoginResponse;
+          await api.fetchCsrfToken();
 
           set({
             user,
@@ -80,6 +82,7 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         try {
+          await api.fetchCsrfToken();
           // Server will read refreshToken from HttpOnly cookie
           await api.post('/api/auth/logout', {}, {
             withCredentials: true
@@ -98,15 +101,18 @@ export const useAuthStore = create<AuthState>()(
 
       refreshTokens: async () => {
         try {
+          await api.fetchCsrfToken();
           // Server reads refreshToken from HttpOnly cookie
           const response = await api.post<RefreshResponse>('/api/auth/refresh', {}, {
-            withCredentials: true
+            withCredentials: true,
+            disableRetry: true
           });
 
           const { accessToken: newAccessToken } = response.data as RefreshResponse;
 
           set({
-            accessToken: newAccessToken
+            accessToken: newAccessToken,
+            isAuthenticated: true
           });
 
           return true;
@@ -133,11 +139,9 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       // Only persist non-sensitive data
-      // accessToken is short-lived so it's acceptable in localStorage
-      // refreshToken is now in HttpOnly cookie (not accessible to JS)
+      // accessToken is kept in memory only; refreshToken stays in HttpOnly cookie
       partialize: (state) => ({
         user: state.user,
-        accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated
       })
     }

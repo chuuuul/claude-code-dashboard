@@ -5,6 +5,17 @@ import { WebLinksAddon } from 'xterm-addon-web-links';
 import { socketService } from '../../services/socket';
 import 'xterm/css/xterm.css';
 
+export function debounce<T extends (...args: any[]) => void>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout>;
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
+
 interface XtermWrapperProps {
   sessionId: string;
   isConnected: boolean;
@@ -69,7 +80,7 @@ export default function XtermWrapper({
     fitAddonRef.current = fitAddon;
 
     // Handle resize
-    const handleResize = () => {
+    const handleResize = debounce(() => {
       if (fitAddonRef.current && xtermRef.current) {
         fitAddonRef.current.fit();
         socketService.resizeTerminal(
@@ -77,7 +88,7 @@ export default function XtermWrapper({
           xtermRef.current.rows
         );
       }
-    };
+    }, 100);
 
     window.addEventListener('resize', handleResize);
 
@@ -116,7 +127,7 @@ export default function XtermWrapper({
     return () => {
       handleData.dispose();
     };
-  }, [isReadOnly]);
+  }, [isReadOnly, sessionId]);
 
   // Show connecting message
   useEffect(() => {

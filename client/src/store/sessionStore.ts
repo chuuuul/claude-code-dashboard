@@ -52,8 +52,9 @@ export const useSessionStore = create<SessionState>((set) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await api.get<Session[]>('/api/sessions');
-      set({ sessions: response.data as Session[], isLoading: false });
+      const response = await api.get<{ sessions: Session[] }>('/api/sessions');
+      const { sessions } = response.data as { sessions: Session[] };
+      set({ sessions, isLoading: false });
     } catch (error: unknown) {
       const message = error instanceof Error
         ? error.message
