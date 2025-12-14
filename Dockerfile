@@ -45,6 +45,7 @@ RUN groupadd -r claude && useradd -r -g claude claude
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI (if available via npm)
