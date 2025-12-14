@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package*.json ./
 
 # Install dependencies (production only)
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Stage 3: Production image
 FROM node:18-slim
