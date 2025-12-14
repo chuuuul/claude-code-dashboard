@@ -2,7 +2,7 @@
 # Multi-stage build for optimized image size
 
 # Stage 1: Build frontend
-FROM node:18-slim AS frontend-builder
+FROM node:25-slim AS frontend-builder
 
 WORKDIR /app/client
 
@@ -19,7 +19,7 @@ COPY client/ ./
 RUN npm run build
 
 # Stage 2: Build backend
-FROM node:18-slim AS backend-builder
+FROM node:25-slim AS backend-builder
 
 WORKDIR /app
 
@@ -37,7 +37,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 # Stage 3: Production image
-FROM node:18-slim
+FROM node:25-slim
 
 # Create non-privileged user
 RUN groupadd -r claude && useradd -r -g claude claude
