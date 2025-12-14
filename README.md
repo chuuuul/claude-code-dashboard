@@ -2,6 +2,71 @@
 
 Claude Code CLI 세션을 웹에서 관리하고 모니터링하는 대시보드
 
+[![CI](https://github.com/USERNAME/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/REPO/actions/workflows/ci.yml)
+[![Security](https://github.com/USERNAME/REPO/actions/workflows/security.yml/badge.svg)](https://github.com/USERNAME/REPO/actions/workflows/security.yml)
+[![Docker](https://github.com/USERNAME/REPO/actions/workflows/docker.yml/badge.svg)](https://github.com/USERNAME/REPO/actions/workflows/docker.yml)
+
+> Replace `USERNAME/REPO` with your GitHub username and repository name
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js 18+**
+- **tmux** installed (`brew install tmux` on macOS, `apt-get install tmux` on Ubuntu)
+- **Python 3** and build tools (for node-pty compilation):
+  - macOS: `xcode-select --install`
+  - Ubuntu: `sudo apt-get install python3 build-essential`
+
+### First Run Setup
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd terminal
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   cd client && npm install && cd ..
+   ```
+
+3. **Configure environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
+
+4. **⚠️ CRITICAL: Set Admin Password**
+   
+   Edit `.env` and set a secure admin password:
+   ```bash
+   ADMIN_PASSWORD=YourSecurePassword123!
+   ```
+   
+   **This is REQUIRED for first run.** The system will create an admin user with:
+   - Username: `admin`
+   - Password: (your ADMIN_PASSWORD value)
+
+5. **Configure allowed directories:**
+   
+   Edit `.env` and set which directories Claude can access:
+   ```bash
+   ALLOWED_PROJECT_ROOTS=/Users/you/projects:/home/you/work
+   ALLOWED_FILE_ROOTS=/Users/you/projects:/home/you/work
+   ```
+
+6. **Start the application:**
+   ```bash
+   npm run dev
+   ```
+
+7. **Access the dashboard:**
+   
+   Open http://localhost:3000 and login with:
+   - Username: `admin`
+   - Password: (your ADMIN_PASSWORD)
+
 ## Features
 
 - **실시간 세션 모니터링** - 여러 프로젝트의 Claude 세션을 동시에 관리
@@ -70,6 +135,89 @@ export JWT_SECRET="your-secret-key"
 export PROJECT_DIR="$HOME/Documents"
 
 docker-compose up --build
+```
+
+### Production Deployment
+
+For production, use Docker (see Dockerfile.production):
+
+```bash
+# Build image
+docker build -f Dockerfile.production -t claude-dashboard .
+
+# Run with environment variables
+docker run -d \
+  -e JWT_SECRET=$(openssl rand -base64 32) \
+  -e ADMIN_PASSWORD=YourSecurePassword \
+  -e ALLOWED_PROJECT_ROOTS=/projects \
+  -e ALLOWED_FILE_ROOTS=/projects \
+  -v /path/to/your/projects:/projects \
+  -p 127.0.0.1:3000:3000 \
+  claude-dashboard
+```
+
+## Security Notes
+
+- **Access tokens** are stored in memory only (not localStorage) to prevent XSS attacks
+- **Refresh tokens** use HttpOnly cookies
+- **CSRF protection** is enabled for all state-changing requests
+- **Default binding** is `127.0.0.1` (localhost only)
+- For remote access, use ngrok (opt-in) or reverse proxy with TLS
+
+## Troubleshooting
+
+### node-pty build fails
+Ensure Python 3 and build tools are installed:
+```bash
+# macOS
+xcode-select --install
+
+# Ubuntu/Debian
+sudo apt-get install python3 build-essential
+```
+
+### "Access denied" errors on session creation
+Check that `ALLOWED_PROJECT_ROOTS` includes the project directory.
+
+### CSRF token errors
+Ensure you're logged in and the frontend fetches a new CSRF token after authentication.
+
+## Development
+
+```bash
+# Run tests
+npm test
+
+# Run tests with coverage
+npm run test:unit
+
+# Lint code
+npm run lint
+
+# Fix linting issues
+npm run lint:fix
+```
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration and deployment:
+
+- **CI Workflow**: Runs tests, linting, and builds on Node.js 18.x and 20.x
+- **Security Workflow**: Daily security scans with CodeQL, npm audit, and Trivy
+- **Docker Workflow**: Multi-platform image builds (amd64, arm64) with automatic releases
+
+For detailed information, see:
+- [Workflow Documentation](.github/workflows/README.md)
+- [Quick Start Guide](.github/WORKFLOWS_GUIDE.md)
+
+### Pull Docker Image
+
+```bash
+# Latest version
+docker pull ghcr.io/USERNAME/REPO:latest
+
+# Specific version
+docker pull ghcr.io/USERNAME/REPO:1.0.0
 ```
 
 ## Environment Variables

@@ -92,6 +92,13 @@ class MetadataExtractor extends EventEmitter {
         }
       });
 
+      watcher.on('error', (error) => {
+        console.error(`[MetadataExtractor] Watcher error for session ${sessionId}:`, error);
+        // Clean up failed watcher
+        watcher.close();
+        this.watchers.delete(sessionId);
+      });
+
       this.watchers.set(sessionId, watcher);
 
       // Return initial data

@@ -1,0 +1,383 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+# Prevent concurrent runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # ==========================================
+  # Dependency Vulnerability Scanning
+  # ==========================================
+
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit
+          cd client && npm ci --prefer-offline --no-audit
+
+      - name: Backend security audit
+        id: backend-audit
+        run: |
+          echo "Running npm audit for backend..."
+          npm audit --json > backend-audit.json || true
+
+          # Check audit results
+          CRITICAL=$(jq -r '.metadata.vulnerabilities.critical // 0' backend-audit.json)
+          HIGH=$(jq -r '.metadata.vulnerabilities.high // 0' backend-audit.json)
+          MODERATE=$(jq -r '.metadata.vulnerabilities.moderate // 0' backend-audit.json)
+
+          echo "Backend vulnerabilities found:"
+          echo "  Critical: $CRITICAL"
+          echo "  High: $HIGH"
+          echo "  Moderate: $MODERATE"
+
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "moderate=$MODERATE" >> $GITHUB_OUTPUT
+
+          # Fail on critical vulnerabilities
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::Critical vulnerabilities found in backend dependencies"
+            npm audit
+            exit 1
+          fi
+
+          # Warn on high vulnerabilities
+          if [ "$HIGH" -gt 0 ]; then
+            echo "::warning::High severity vulnerabilities found in backend dependencies"
+            npm audit --audit-level=high
+          fi
+
+      - name: Frontend security audit
+        id: frontend-audit
+        run: |
+          cd client
+          echo "Running npm audit for frontend..."
+          npm audit --json > frontend-audit.json || true
+
+          # Check audit results
+          CRITICAL=$(jq -r '.metadata.vulnerabilities.critical // 0' frontend-audit.json)
+          HIGH=$(jq -r '.metadata.vulnerabilities.high // 0' frontend-audit.json)
+          MODERATE=$(jq -r '.metadata.vulnerabilities.moderate // 0' frontend-audit.json)
+
+          echo "Frontend vulnerabilities found:"
+          echo "  Critical: $CRITICAL"
+          echo "  High: $HIGH"
+          echo "  Moderate: $MODERATE"
+
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "moderate=$MODERATE" >> $GITHUB_OUTPUT
+
+          # Fail on critical vulnerabilities
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::Critical vulnerabilities found in frontend dependencies"
+            npm audit
+            exit 1
+          fi
+
+          # Warn on high vulnerabilities
+          if [ "$HIGH" -gt 0 ]; then
+            echo "::warning::High severity vulnerabilities found in frontend dependencies"
+            npm audit --audit-level=high
+          fi
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: audit-reports
+          path: |
+            backend-audit.json
+            client/frontend-audit.json
+          retention-days: 30
+
+  # ==========================================
+  # License Compliance Check
+  # ==========================================
+
+  license-check:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit
+          cd client && npm ci --prefer-offline --no-audit
+
+      - name: Check backend licenses
+        run: |
+          echo "Checking backend dependency licenses..."
+          npx license-checker --summary || echo "::warning::License check tool not available"
+        continue-on-error: true
+
+      - name: Check frontend licenses
+        working-directory: client
+        run: |
+          echo "Checking frontend dependency licenses..."
+          npx license-checker --summary || echo "::warning::License check tool not available"
+        continue-on-error: true
+
+  # ==========================================
+  # CodeQL Analysis (SAST)
+  # ==========================================
+
+  codeql-analysis:
+    name: CodeQL Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1b1aada464948af03b950897e5eb522f92603cc2 # v3.24.9
+        with:
+          languages: ${{ matrix.language }}
+          queries: +security-and-quality
+
+      - name: Setup Node.js
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit
+          cd client && npm ci --prefer-offline --no-audit
+
+      - name: Build project
+        run: |
+          cd client && npm run build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@1b1aada464948af03b950897e5eb522f92603cc2 # v3.24.9
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ==========================================
+  # Secret Scanning
+  # ==========================================
+
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0 # Full history for better detection
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@1e82dfc4b0da3f0a01eb35df2e58c1b71c880c6e # v3.73.0
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  # ==========================================
+  # Docker Image Scanning
+  # ==========================================
+
+  docker-scan:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@2b51285047da1547ffb1b2203d8be4c0af6b1f20 # v3.2.0
+
+      - name: Build Docker image
+        uses: docker/build-push-action@2cdde995de11925a030ce8070c3d77a52ffcf1c0 # v5.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: claude-dashboard:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@7c2007bcb556501da015201bcba5aa14069b74e2 # v0.20.0
+        with:
+          image-ref: claude-dashboard:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@1b1aada464948af03b950897e5eb522f92603cc2 # v3.24.9
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Trivy vulnerability scanner (table format)
+        uses: aquasecurity/trivy-action@7c2007bcb556501da015201bcba5aa14069b74e2 # v0.20.0
+        with:
+          image-ref: claude-dashboard:scan
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1' # Fail on high/critical vulnerabilities
+
+  # ==========================================
+  # Dependency Update Check
+  # ==========================================
+
+  dependency-update-check:
+    name: Outdated Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit
+          cd client && npm ci --prefer-offline --no-audit
+
+      - name: Check for outdated dependencies
+        id: outdated
+        run: |
+          echo "# Outdated Dependencies Report" > outdated-report.md
+          echo "" >> outdated-report.md
+
+          echo "## Backend Dependencies" >> outdated-report.md
+          npm outdated --json > backend-outdated.json || true
+
+          if [ -s backend-outdated.json ]; then
+            echo "\`\`\`json" >> outdated-report.md
+            cat backend-outdated.json >> outdated-report.md
+            echo "\`\`\`" >> outdated-report.md
+          else
+            echo "All backend dependencies are up to date!" >> outdated-report.md
+          fi
+
+          echo "" >> outdated-report.md
+          echo "## Frontend Dependencies" >> outdated-report.md
+          cd client && npm outdated --json > frontend-outdated.json || true
+
+          if [ -s frontend-outdated.json ]; then
+            echo "\`\`\`json" >> outdated-report.md
+            cat frontend-outdated.json >> outdated-report.md
+            echo "\`\`\`" >> outdated-report.md
+          else
+            echo "All frontend dependencies are up to date!" >> outdated-report.md
+          fi
+
+          cat ../outdated-report.md
+
+      - name: Upload outdated dependencies report
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: outdated-dependencies-report
+          path: outdated-report.md
+          retention-days: 30
+
+  # ==========================================
+  # Security Status Check
+  # ==========================================
+
+  security-status:
+    name: Security Status Check
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - dependency-scan
+      - license-check
+      - codeql-analysis
+      - secret-scan
+      - docker-scan
+
+    steps:
+      - name: Check security results
+        run: |
+          echo "Security scan results:"
+          echo "  Dependency Scan: ${{ needs.dependency-scan.result }}"
+          echo "  License Check: ${{ needs.license-check.result }}"
+          echo "  CodeQL Analysis: ${{ needs.codeql-analysis.result }}"
+          echo "  Secret Scan: ${{ needs.secret-scan.result }}"
+          echo "  Docker Scan: ${{ needs.docker-scan.result }}"
+
+          # Fail if critical security checks failed
+          if [[ "${{ needs.dependency-scan.result }}" == "failure" ]]; then
+            echo "::error::Dependency scan failed - critical vulnerabilities found"
+            exit 1
+          fi
+
+          if [[ "${{ needs.secret-scan.result }}" == "failure" ]]; then
+            echo "::error::Secret scan failed - secrets detected in code"
+            exit 1
+          fi
+
+          echo "Security checks completed!"

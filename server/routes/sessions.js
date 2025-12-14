@@ -27,26 +27,7 @@ function createSessionRoutes(sessionManager, metadataExtractor, auditLogger) {
     async (req, res, next) => {
       try {
         const sessions = await sessionManager.listSessions();
-
-        // Enrich with metadata if available
-        const enrichedSessions = await Promise.all(
-          sessions.map(async (session) => {
-            if (metadataExtractor) {
-              try {
-                const metadata = await metadataExtractor.getMetadata(
-                  session.session_id,
-                  session.project_path
-                );
-                return { ...session, metadata };
-              } catch {
-                return session;
-              }
-            }
-            return session;
-          })
-        );
-
-        res.json(enrichedSessions);
+        res.json({ sessions });
       } catch (error) {
         next(error);
       }
@@ -257,9 +238,27 @@ function createSessionRoutes(sessionManager, metadataExtractor, auditLogger) {
         const token = crypto.randomBytes(32).toString('hex');
         const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
-        // Store token in database (would need a share_tokens table)
-        // For now, return a simple token
-        // In production, this should be stored and validated
+        // Store token in database
+        const db = auditLogger.getDb();
+        const hasCreatedByColumn = db.prepare("PRAGMA table_info('share_tokens')").all()
+          .some((col) => col.name === 'created_by');
+
+        const insertSql = hasCreatedByColumn
+          ? `
+            INSERT INTO share_tokens (session_id, token, expires_at, created_by)
+            VALUES (?, ?, datetime(?), ?)
+          `
+          : `
+            INSERT INTO share_tokens (session_id, token, expires_at)
+            VALUES (?, ?, datetime(?))
+          `;
+
+        db.prepare(insertSql.trim()).run(
+          req.validatedSessionId,
+          token,
+          expiresAt.toISOString(),
+          hasCreatedByColumn ? req.user.id : undefined
+        );
 
         auditLogger.log({
           userId: req.user.id,

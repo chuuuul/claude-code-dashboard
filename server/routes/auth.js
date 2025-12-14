@@ -25,8 +25,9 @@ const REFRESH_TOKEN_COOKIE_OPTIONS = {
  * Initialize auth routes with dependencies
  * @param {AuthService} authService
  * @param {AuditLogger} auditLogger
+ * @param {Function} csrfProtection
  */
-function createAuthRoutes(authService, auditLogger) {
+function createAuthRoutes(authService, auditLogger, csrfProtection) {
   /**
    * POST /api/auth/login
    * Login with username and password
@@ -83,6 +84,7 @@ function createAuthRoutes(authService, auditLogger) {
    */
   router.post('/refresh',
     rateLimitMiddleware('tokenRefresh'),
+    csrfProtection,
     async (req, res, next) => {
       try {
         // Get refresh token from HttpOnly cookie (preferred) or body (legacy/fallback)
@@ -128,6 +130,7 @@ function createAuthRoutes(authService, auditLogger) {
    * Revoke refresh token and clear cookie
    */
   router.post('/logout',
+    csrfProtection,
     authMiddleware(),
     async (req, res, next) => {
       try {
@@ -292,8 +295,8 @@ function createAuthRoutes(authService, auditLogger) {
    * GET /api/csrf-token
    * Get CSRF token for forms
    */
-  router.get('/csrf-token', (req, res) => {
-    res.json({ csrfToken: req.csrfToken?.() || 'csrf-disabled' });
+  router.get('/csrf-token', csrfProtection, (req, res) => {
+    res.json({ csrfToken: req.csrfToken() });
   });
 
   return router;

@@ -97,6 +97,9 @@ function initializeSocketHandler(io, sessionManager, auditLogger) {
         currentSessionId = sessionId;
         isReadOnly = mode === 'viewer';
 
+        // Join room for metadata updates
+        socket.join(`session:${sessionId}`);
+
         // Handle master/viewer mode
         if (mode === 'master') {
           if (sessionManager.hasMaster(sessionId)) {

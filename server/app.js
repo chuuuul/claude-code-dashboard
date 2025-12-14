@@ -14,6 +14,7 @@ const path = require('path');
 const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const csrf = require('csurf');
 
 // Database
 const { getDatabase, closeDatabase } = require('./db');
@@ -83,6 +84,15 @@ async function createServer() {
 
   // Recover existing tmux sessions
   await sessionManager.recoverSessions();
+
+  // Start metadata polling for recovered sessions
+  if (metadataExtractor) {
+    for (const [sessionId, sessionData] of sessionManager.activeSessions) {
+      if (sessionData.project_path) {
+        metadataExtractor.startPolling(sessionId, sessionData.project_path);
+      }
+    }
+  }
 
   // Connect SessionManager audit events to AuditLogger
   sessionManager.on('audit', (event) => {
@@ -154,6 +164,29 @@ async function createServer() {
     credentials: true
   }));
 
+  // Body parser middleware
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+  app.use(cookieParser());
+
+  // CSRF protection for state-changing routes
+  const csrfProtection = csrf({
+    cookie: {
+      httpOnly: true,
+      secure: NODE_ENV === 'production',
+      sameSite: 'strict'
+    }
+  });
+  app.use('/api/sessions', csrfProtection);
+  app.use('/api/files', csrfProtection);
+
+  // Request logging
+  if (NODE_ENV === 'production') {
+    app.use(require('morgan')('combined'));
+  } else {
+    app.use(require('morgan')('dev'));
+  }
+
   // Health check (no auth required)
   app.get('/health', async (req, res) => {
     const checks = {
@@ -190,7 +223,7 @@ async function createServer() {
   });
 
   // API routes
-  app.use('/api/auth', createAuthRoutes(authService, auditLogger));
+  app.use('/api/auth', createAuthRoutes(authService, auditLogger, csrfProtection));
   app.use('/api/sessions', createSessionRoutes(sessionManager, metadataExtractor, auditLogger));
 
   if (fileExplorer) {

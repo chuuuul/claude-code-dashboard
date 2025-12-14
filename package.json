@@ -18,7 +18,11 @@
     "lint:fix": "eslint --fix server/**/*.js client/src/**/*.{js,jsx,ts,tsx}",
     "verify": "npm run lint && npm run build && npm run test:smoke",
     "test:smoke": "node scripts/smoke-test.js",
-    "prepare": "husky install || true"
+    "prepare": "husky install || true",
+    "pm2:start": "pm2 start server/app.js --name claude-dashboard",
+    "pm2:stop": "pm2 stop claude-dashboard",
+    "pm2:restart": "pm2 restart claude-dashboard",
+    "pm2:logs": "pm2 logs claude-dashboard"
   },
   "keywords": [
     "claude",
@@ -40,6 +44,7 @@
     "express": "^4.18.2",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
     "node-pty": "^1.0.0",
     "rate-limiter-flexible": "^4.0.1",
     "socket.io": "^4.7.2",

@@ -324,6 +324,14 @@ class AuditLogger {
     console.log(`[AuditLogger] Cleaned up ${result.changes} old logs`);
     return result.changes;
   }
+
+  /**
+   * Return underlying database connection for trusted operations.
+   * @returns {import('better-sqlite3').Database}
+   */
+  getDb() {
+    return this.db;
+  }
 }
 
 module.exports = AuditLogger;
