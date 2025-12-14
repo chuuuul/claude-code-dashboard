@@ -48,7 +48,7 @@
     "node-pty": "^1.0.0",
     "rate-limiter-flexible": "^4.0.1",
     "socket.io": "^4.7.2",
-    "uuid": "^9.0.1"
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.1",
