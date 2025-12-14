@@ -8,6 +8,7 @@ export interface SessionMetadata {
   costUsd?: number;
   status?: string;
   lastMessage?: string;
+  timestamp?: string;
 }
 
 export interface Session {
@@ -40,7 +41,7 @@ interface SessionState {
   clearError: () => void;
 }
 
-export const useSessionStore = create<SessionState>((set, get) => ({
+export const useSessionStore = create<SessionState>((set) => ({
   sessions: [],
   currentSessionId: null,
   connectionMode: null,
@@ -51,8 +52,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await api.get('/api/sessions');
-      set({ sessions: response.data, isLoading: false });
+      const response = await api.get<Session[]>('/api/sessions');
+      set({ sessions: response.data as Session[], isLoading: false });
     } catch (error: unknown) {
       const message = error instanceof Error
         ? error.message
@@ -66,12 +67,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const response = await api.post('/api/sessions', {
+      const response = await api.post<Session>('/api/sessions', {
         projectPath,
         projectName
       });
 
-      const newSession = response.data;
+      const newSession = response.data as Session;
 
       set((state) => ({
         sessions: [...state.sessions, newSession],

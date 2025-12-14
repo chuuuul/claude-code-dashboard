@@ -24,9 +24,18 @@ interface AuthState {
   setAccessToken: (token: string) => void;
 }
 
+interface LoginResponse {
+  accessToken: string;
+  user: User;
+}
+
+interface RefreshResponse {
+  accessToken: string;
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
       accessToken: null,
       isAuthenticated: false,
@@ -37,7 +46,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
 
         try {
-          const response = await api.post('/api/auth/login', {
+          const response = await api.post<LoginResponse>('/api/auth/login', {
             username,
             password
           }, {
@@ -45,7 +54,7 @@ export const useAuthStore = create<AuthState>()(
           });
 
           // Server now only returns accessToken and user (refreshToken is in HttpOnly cookie)
-          const { accessToken, user } = response.data;
+          const { accessToken, user } = response.data as LoginResponse;
 
           set({
             user,
@@ -90,11 +99,11 @@ export const useAuthStore = create<AuthState>()(
       refreshTokens: async () => {
         try {
           // Server reads refreshToken from HttpOnly cookie
-          const response = await api.post('/api/auth/refresh', {}, {
+          const response = await api.post<RefreshResponse>('/api/auth/refresh', {}, {
             withCredentials: true
           });
 
-          const { accessToken: newAccessToken } = response.data;
+          const { accessToken: newAccessToken } = response.data as RefreshResponse;
 
           set({
             accessToken: newAccessToken
