@@ -1,0 +1,74 @@
+# Development Environment Override
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - DEBUG=true
+      - LOG_LEVEL=debug
+      - JWT_SECRET=dev-secret-key-change-in-production-must-be-32-chars-minimum
+      - ALLOWED_FILE_ROOTS=/projects:/tmp/test-files
+      - ALLOWED_PROJECT_ROOTS=/projects:/tmp/test-projects
+
+    volumes:
+      # Allow hot reload of server code
+      - ./server:/app/server:rw
+      - ./client/src:/app/client/src:rw
+      # Exclude node_modules to use installed versions
+      - /app/node_modules
+      - /app/client/node_modules
+      # Projects and data
+      - ${PROJECT_DIR:-./projects}:/projects:rw
+      - dashboard_data:/app/data
+
+    ports:
+      # Main dashboard
+      - "127.0.0.1:3000:3000"
+      # Allow external access in dev for testing (use with caution)
+      - "3000:3000"
+
+    security_opt:
+      # Relaxed for development debugging
+      - "apparmor=unconfined"
+
+    # No read-only filesystem in dev for easier file management
+    read_only: false
+
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
+
+    # More permissive capabilities for development
+    cap_drop:
+      - NET_RAW
+      - SYS_PTRACE
+      - SYS_ADMIN
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 2
+      start_period: 5s
+
+    # Development restart policy
+    restart: unless-stopped
+
+    # Enable debugging
+    stdin_open: true
+    tty: true
+
+volumes:
+  dashboard_data:
+    driver: local

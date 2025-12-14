@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+.travis.yml
+
+# Node.js
+node_modules
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+README.md
+CHANGELOG.md
+DEVOPS_ASSESSMENT.md
+CLAUDE.md
+CLAUDE_CODE_DASHBOARD_PLAN.md
+
+# Testing
+coverage
+.nyc_output
+*.lcov
+
+# Build artifacts
+dist
+build
+*.tgz
+
+# Misc
+.editorconfig
+.prettierrc
+.eslintrc*
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore

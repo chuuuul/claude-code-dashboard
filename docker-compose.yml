@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claude-code-dashboard
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET}
+      - ALLOWED_FILE_ROOTS=/projects
+      - ALLOWED_PROJECT_ROOTS=/projects
+      - DB_PATH=/app/data/dashboard.db
+    volumes:
+      # Mount projects directory
+      - ${PROJECT_DIR:-./projects}:/projects:rw
+      # Persist SQLite database
+      - dashboard_data:/app/data
+      # Mount Claude config (read-only)
+      - ${HOME}/.claude:/home/claude/.claude:ro
+    ports:
+      # Bind to localhost only by default
+      - "127.0.0.1:3000:3000"
+    security_opt:
+      - no-new-privileges:true
+    # Read-only root filesystem (only /app/data is writable)
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
+    # Minimal capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  dashboard_data:
+    driver: local

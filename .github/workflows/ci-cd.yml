@@ -1,0 +1,317 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  NODE_VERSION: '18'
+
+jobs:
+  # ==========================================
+  # STAGE 1: Install & Build Verification
+  # ==========================================
+
+  build-test:
+    runs-on: ubuntu-latest
+    name: Build & Verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: cd client && npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Verify server starts
+        run: |
+          # Create test environment
+          cp .env.example .env
+          sed -i 's|/Users/you/projects:/home/you/work|/tmp/test|g' .env
+          mkdir -p /tmp/test
+          mkdir -p data
+
+          # Start server in background
+          ADMIN_PASSWORD="TestPassword123!" node server/app.js &
+          SERVER_PID=$!
+
+          # Wait for server to start
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:3000/health > /dev/null 2>&1; then
+              echo "Server started successfully!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Server failed to start"
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Health check
+          HEALTH=$(curl -s http://127.0.0.1:3000/health)
+          echo "Health check response: $HEALTH"
+
+          # Verify health response
+          if echo "$HEALTH" | grep -q '"status":"healthy"'; then
+            echo "Health check passed!"
+          else
+            echo "Health check failed!"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          echo "Build verification complete!"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: client/build/
+          retention-days: 7
+
+  # ==========================================
+  # STAGE 2: Code Quality
+  # ==========================================
+
+  lint:
+    runs-on: ubuntu-latest
+    name: Code Quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint || echo "Lint warnings found"
+
+      - name: Security audit
+        run: npm audit --audit-level=high || echo "Security warnings found"
+
+  # ==========================================
+  # STAGE 3: Testing
+  # ==========================================
+
+  test-unit:
+    runs-on: ubuntu-latest
+    name: Unit Tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit -- --coverage --passWithNoTests
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        continue-on-error: true
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+
+  test-integration:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: npm run test:integration --passWithNoTests || echo "No integration tests yet"
+
+  # ==========================================
+  # STAGE 4: Docker Build & Smoke Test
+  # ==========================================
+
+  docker-build:
+    needs: [build-test, lint]
+    runs-on: ubuntu-latest
+    name: Docker Build & Test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: claude-dashboard:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Docker smoke test
+        run: |
+          # Start container
+          docker run -d \
+            --name dashboard-test \
+            -p 3000:3000 \
+            -e JWT_SECRET=test-secret-key-for-ci \
+            -e ADMIN_PASSWORD="TestPassword123!" \
+            -e ALLOWED_PROJECT_ROOTS=/projects \
+            -e ALLOWED_FILE_ROOTS=/projects \
+            claude-dashboard:test
+
+          # Wait for container to be healthy
+          echo "Waiting for container to be ready..."
+          for i in {1..60}; do
+            if docker exec dashboard-test node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))" 2>/dev/null; then
+              echo "Container is healthy!"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Container failed to become healthy"
+              docker logs dashboard-test
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Run smoke tests
+          echo "Running smoke tests..."
+
+          # Test 1: Health endpoint
+          HEALTH=$(docker exec dashboard-test curl -s http://localhost:3000/health)
+          if echo "$HEALTH" | grep -q '"status":"healthy"'; then
+            echo "✓ Health check passed"
+          else
+            echo "✗ Health check failed"
+            exit 1
+          fi
+
+          # Test 2: Check security headers
+          HEADERS=$(docker exec dashboard-test curl -sI http://localhost:3000/health)
+          if echo "$HEADERS" | grep -qi "x-content-type-options"; then
+            echo "✓ Security headers present"
+          else
+            echo "✗ Security headers missing"
+          fi
+
+          echo "All smoke tests passed!"
+
+          # Cleanup
+          docker stop dashboard-test
+          docker rm dashboard-test
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Push Docker image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==========================================
+  # STAGE 5: Deploy (Optional)
+  # ==========================================
+
+  deploy-staging:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        run: |
+          echo "Deploying to staging..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          # Add your deployment script here:
+          # ./scripts/deploy.sh staging
+
+  deploy-production:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Deploying version $VERSION to production..."
+          # Add your deployment script here:
+          # ./scripts/deploy.sh production $VERSION

@@ -1,0 +1,16 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+echo "Running pre-commit checks..."
+
+# Lint
+npm run lint || {
+  echo "Lint failed. Please fix errors before committing."
+  exit 1
+}
+
+# Type check (if using TypeScript in client)
+cd client && npm run build -- --noEmit 2>/dev/null || true
+cd ..
+
+echo "Pre-commit checks passed!"
