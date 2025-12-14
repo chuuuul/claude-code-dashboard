@@ -46,7 +46,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
     "node-pty": "^1.0.0",
-    "rate-limiter-flexible": "^4.0.1",
+    "rate-limiter-flexible": "^9.0.1",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.1"
   },
